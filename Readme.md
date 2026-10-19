@@ -3,14 +3,14 @@
 <p align="center">
   <img src="https://img.shields.io/badge/NexusInk-Client%20v1.0-6C5CE7?style=for-the-badge&logo=flutter&logoColor=white" alt="NexusInk Client Badge"/>
   <a href="https://github.com/brandalexdev/NexusInk-client/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(Release)-00b894?style=for-the-badge&logo=android&logoColor=white" alt="Download Latest APK"/>
+    <img src="https://img.shields.io/badge/📥%20Download-Latest%20APK%20(Direct%20Download)-00b894?style=for-the-badge&logo=android&logoColor=white" alt="Download Latest APK"/>
   </a>
 </p>
 
 <p align="center">
-  <a href="https://flutter.dev"><img src="https://img.shields.io/badge/Built%20with-Flutter%203-02569B?style=flat-square&logo=flutter&logoColor=white" alt="Flutter"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/Platform-Android%20%7C%20HarmonyOS-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"/></a>
+  <a href="https://github.com/brandalexdev/NexusInk-client/releases/latest"><img src="https://img.shields.io/badge/Zero%20Setup-Ready%20to%20Use%20(No%20Compile)-brightgreen?style=flat-square" alt="No Compile"/></a>
   <a href="https://github.com/brandalexdev/NexusInk-Server"><img src="https://img.shields.io/badge/Companion%20Server-NexusInk--Server-0078D4?style=flat-square&logo=windows&logoColor=white" alt="NexusInk Server"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/Platform-Android%20%7C%20HarmonyOS-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"/></a>
   <a href="#"><img src="https://img.shields.io/badge/Stylus%20Telemetry-UDP%20%3C1ms-brightgreen?style=flat-square" alt="Latency"/></a>
   <a href="#"><img src="https://img.shields.io/badge/Display%20Stream-1080p%20HD-blue?style=flat-square" alt="Stream Quality"/></a>
 </p>
@@ -19,7 +19,7 @@
 
 ## 📖 Overview
 
-**NexusInk-Client** is a high-precision, low-latency graphic tablet client built with Flutter. It transforms your Android or HarmonyOS tablet and active stylus into a professional **Wacom Cintiq / Intuos** style drawing display for Windows PCs.
+**NexusInk-Client** is a high-precision, low-latency graphic tablet client built for Android and HarmonyOS tablets with active styluses. It transforms your tablet into a professional **Wacom Cintiq / Intuos** style drawing display for Windows PCs.
 
 Paired with the [**NexusInk-Server**](https://github.com/brandalexdev/NexusInk-Server) Windows application, your tablet sends native pressure, tilt, hover, and shortcut events directly into the Windows Ink API while receiving a real-time **1080p Full HD screen stream**.
 
@@ -28,23 +28,31 @@ Paired with the [**NexusInk-Server**](https://github.com/brandalexdev/NexusInk-S
 
 ---
 
-## 📥 Direct Download & Quick Start (APK)
+## 📥 Direct Download & Quick Start (For Regular Users)
 
-You do **not** need to install Flutter or compile from source to use NexusInk. You can download the ready-to-install `.apk` directly from GitHub Releases:
+> [!IMPORTANT]
+> **No compilation or coding required!**  
+> You do **not** need to install Flutter, Android SDK, or build anything. Simply download the pre-compiled `.apk` file directly to your tablet and start drawing in seconds.
 
-👉 [**Download Latest NexusInk-Client.apk (GitHub Releases)**](https://github.com/brandalexdev/NexusInk-client/releases/latest)
+👉 [**Click Here to Download Latest NexusInk-Client.apk (GitHub Releases)**](https://github.com/brandalexdev/NexusInk-client/releases/latest)
 
-### 📲 Quick Installation Steps:
-1. **Download the APK:** Open the [Releases page](https://github.com/brandalexdev/NexusInk-client/releases/latest) on your tablet (or download to PC and transfer it via USB cable / LocalSend).
-2. **Install:** Tap the `.apk` file on your tablet to install it (enable *"Install unknown apps"* if prompted).
-3. **Launch the Server:** On your Windows PC, run [**`NexusInk-Server.exe`**](https://github.com/brandalexdev/NexusInk-Server).
-4. **Draw:** Open **NexusInk-Client** on your tablet. Both devices will pair automatically within 1 second via UDP discovery!
+### 📲 How to Start in 3 Steps:
 
-> [!TIP]
-> **HarmonyOS / EMUI Tip:** Go to *Settings ➔ Accessibility features ➔ Stylus (M-Pencil)* and turn off **"FreeScript"** so the OS does not intercept fast strokes near screen borders.
+1. **Download the APK:**  
+   Open the [Releases page](https://github.com/brandalexdev/NexusInk-client/releases/latest) from your tablet browser and download **`NexusInk-Client.apk`** (or download it to your PC and transfer it via USB cable or LocalSend).
+
+2. **Install on Your Tablet:**  
+   Tap the downloaded `.apk` file to install it. If prompted by your system, enable *"Install unknown apps"*.
+
+3. **Open Server & Draw:**  
+   * On your Windows PC, double-click [**`NexusInk-Server.exe`**](https://github.com/brandalexdev/NexusInk-Server).
+   * Open **NexusInk-Client** on your tablet. Both devices will automatically detect and pair with each other in less than 1 second via UDP auto-discovery!
 
 > [!TIP]
 > **Wired USB Connection (< 1ms Latency):** Connect your tablet to the PC via USB-C cable and enable **USB Tethering** in tablet network settings. Windows will detect a direct network link; tap *Auto-Discover* on the tablet to connect instantly with sub-millisecond response.
+
+> [!TIP]
+> **HarmonyOS / EMUI Tip:** Go to *Settings ➔ Accessibility features ➔ Stylus (M-Pencil)* and turn off **"FreeScript"** so the OS does not intercept fast strokes near screen borders.
 
 ---
 
@@ -114,29 +122,37 @@ Because NexusInk reads native hardware stylus axes directly from the OS, it work
 
 ---
 
-## 🛠️ Building from Source (Developers)
+## 🛠️ For Developers: Building from Source (Optional)
 
-If you wish to modify or build the client APK from source:
+<details>
+<summary><b>Click here if you are a developer and wish to compile or modify the source code with Flutter</b></summary>
+<br>
+
+> [!NOTE]
+> This section is strictly for developers who want to contribute or customize the app. Regular users should follow the [Direct Download](#-direct-download--quick-start-for-regular-users) instructions above.
 
 ### Prerequisites
 * Flutter SDK (3.13+ or latest 3.47+)
 * Android SDK (API 34+)
 * Java / JDK 17
 
-### Build Steps:
+### Build Commands:
 ```bash
 # 1. Clone the repository
 git clone https://github.com/brandalexdev/NexusInk-client.git
 cd NexusInk-client
 
-# 2. Get Flutter dependencies
+# 2. Get dependencies
 flutter pub get
 
-# 3. Build the Release APK
+# 3. Build release APK
 flutter build apk --release
 ```
 
-The output APK will be placed at `build/app/outputs/flutter-apk/app-release.apk`.
+The resulting package is generated at:
+`build/app/outputs/flutter-apk/app-release.apk`
+
+</details>
 
 ---
 
