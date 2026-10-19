@@ -1,0 +1,59 @@
+# --------------------------------------------------
+# NexusInk-Client - .gitignore
+# Exclude build artifacts, heavy binaries, IDE & temporary files
+# --------------------------------------------------
+
+# Binaries & Large Installation Packages (Avoid Git 100MB limit & repo bloat)
+*.apk
+*.aab
+*.ipa
+Tab.apk
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Android build & caches
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/local.properties
+android/captures/
+android/gradle/wrapper/gradle-wrapper.jar
+*.hprof
+
+# IDEs & Editors
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.fleet/
+.history/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Symbols & Obfuscation
+app.*.symbols
+app.*.map.json
+*.class
+*.log
+*.pyc
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
