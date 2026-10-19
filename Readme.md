@@ -2,6 +2,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/NexusInk-Client%20v1.0-6C5CE7?style=for-the-badge&logo=flutter&logoColor=white" alt="NexusInk Client Badge"/>
+  <a href="https://github.com/brandalexdev/NexusInk-client/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(Release)-00b894?style=for-the-badge&logo=android&logoColor=white" alt="Download Latest APK"/>
+  </a>
 </p>
 
 <p align="center">
@@ -22,6 +25,26 @@ Paired with the [**NexusInk-Server**](https://github.com/brandalexdev/NexusInk-S
 
 > [!NOTE]
 > This repository contains the **tablet client** application (APK). For the Windows desktop host application, check out [**NexusInk-Server**](https://github.com/brandalexdev/NexusInk-Server).
+
+---
+
+## 📥 Direct Download & Quick Start (APK)
+
+You do **not** need to install Flutter or compile from source to use NexusInk. You can download the ready-to-install `.apk` directly from GitHub Releases:
+
+👉 [**Download Latest NexusInk-Client.apk (GitHub Releases)**](https://github.com/brandalexdev/NexusInk-client/releases/latest)
+
+### 📲 Quick Installation Steps:
+1. **Download the APK:** Open the [Releases page](https://github.com/brandalexdev/NexusInk-client/releases/latest) on your tablet (or download to PC and transfer it via USB cable / LocalSend).
+2. **Install:** Tap the `.apk` file on your tablet to install it (enable *"Install unknown apps"* if prompted).
+3. **Launch the Server:** On your Windows PC, run [**`NexusInk-Server.exe`**](https://github.com/brandalexdev/NexusInk-Server).
+4. **Draw:** Open **NexusInk-Client** on your tablet. Both devices will pair automatically within 1 second via UDP discovery!
+
+> [!TIP]
+> **HarmonyOS / EMUI Tip:** Go to *Settings ➔ Accessibility features ➔ Stylus (M-Pencil)* and turn off **"FreeScript"** so the OS does not intercept fast strokes near screen borders.
+
+> [!TIP]
+> **Wired USB Connection (< 1ms Latency):** Connect your tablet to the PC via USB-C cable and enable **USB Tethering** in tablet network settings. Windows will detect a direct network link; tap *Auto-Discover* on the tablet to connect instantly with sub-millisecond response.
 
 ---
 
@@ -91,44 +114,29 @@ Because NexusInk reads native hardware stylus axes directly from the OS, it work
 
 ---
 
-## 🚀 Build & Installation Guide
+## 🛠️ Building from Source (Developers)
+
+If you wish to modify or build the client APK from source:
 
 ### Prerequisites
 * Flutter SDK (3.13+ or latest 3.47+)
 * Android SDK (API 34+)
 * Java / JDK 17
 
-### 1. Clone the Repository
+### Build Steps:
 ```bash
+# 1. Clone the repository
 git clone https://github.com/brandalexdev/NexusInk-client.git
 cd NexusInk-client
-```
 
-### 2. Install Dependencies
-```bash
+# 2. Get Flutter dependencies
 flutter pub get
-```
 
-### 3. Build the Release APK
-```bash
+# 3. Build the Release APK
 flutter build apk --release
 ```
 
-The compiled APK will be generated at:
-```text
-build/app/outputs/flutter-apk/app-release.apk
-```
-
-### 4. Install on Tablet
-1. Transfer `app-release.apk` to your tablet via USB cable, LocalSend, or cloud storage.
-2. Tap the `.apk` file to install it.
-3. Open **NexusInk-Client** on your tablet while [**NexusInk-Server**](https://github.com/brandalexdev/NexusInk-Server) is running on your Windows PC. They will auto-pair automatically!
-
-> [!TIP]
-> **HarmonyOS / EMUI Tip:** Go to *Settings ➔ Accessibility features ➔ Stylus (M-Pencil)* and turn off **"FreeScript"** so the OS does not intercept fast strokes near screen borders.
-
-> [!TIP]
-> **Wired USB Connection (< 1ms Latency):** Connect your tablet to the PC via USB-C cable and enable **USB Tethering** in tablet network settings. Windows will detect a direct network interface; tap *Auto-Discover* on the tablet to connect instantly with sub-millisecond response.
+The output APK will be placed at `build/app/outputs/flutter-apk/app-release.apk`.
 
 ---
 
@@ -140,4 +148,4 @@ build/app/outputs/flutter-apk/app-release.apk
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
