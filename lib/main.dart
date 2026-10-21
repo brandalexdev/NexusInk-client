@@ -48,10 +48,13 @@ class TabletWorkspace extends StatefulWidget {
 
 class _TabletWorkspaceState extends State<TabletWorkspace> {
   RawDatagramSocket? _udpSocket;
+  Socket? _stylusTcpSocket;
   Socket? _videoSocket;
   InternetAddress? _serverAddress;
 
   bool _isConnected = false;
+  bool _isUsbMode = false;
+  bool _usbDetected = false;
   bool _showScreenStream = true;
   bool _isToolbarCollapsed = false;
   bool _stretchFullScreen =
@@ -71,64 +74,256 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
     _initSocketAndDiscover();
   }
 
-  Future<void> _initSocketAndDiscover() async {
-    setState(() => _isConnected = false);
-
-    _udpSocket?.close();
-    _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    _udpSocket!.broadcastEnabled = true;
-
-    _udpSocket!.listen((RawSocketEvent event) {
-      if (event == RawSocketEvent.read) {
-        final dg = _udpSocket!.receive();
-        if (dg != null) {
-          final msg = String.fromCharCodes(dg.data);
-          if (msg == "NEXUS_INK_SERVER_OK" || msg == "MATEPAD_INK_SERVER_OK") {
-            _connectToServerIp(dg.address);
-          }
-        }
-      }
-    });
-
-    // Broadcast discovery pulse for NexusInk Server (and legacy fallback)
-    _udpSocket!.send(
-      "DISCOVER_NEXUS_SERVER".codeUnits,
-      InternetAddress("255.255.255.255"),
-      5001,
-    );
-    _udpSocket!.send(
-      "DISCOVER_MATEPAD_SERVER".codeUnits,
-      InternetAddress("255.255.255.255"),
-      5001,
-    );
+  bool _isLoopback(InternetAddress ip) {
+    return ip.isLoopback || ip.address == '127.0.0.1' || ip.host == 'localhost';
   }
 
-  void _connectToServerIp(InternetAddress ip) {
+  Future<void> _initSocketAndDiscover() async {
+    setState(() {
+      _isConnected = false;
+      _usbDetected = false;
+    });
+
+    _stylusTcpSocket?.destroy();
+    _stylusTcpSocket = null;
+    _videoSocket?.destroy();
+    _videoSocket = null;
+
+    _udpSocket?.close();
+    try {
+      _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      _udpSocket!.broadcastEnabled = true;
+
+      _udpSocket!.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          final dg = _udpSocket!.receive();
+          if (dg != null) {
+            final msg = String.fromCharCodes(dg.data);
+            if (msg.contains("NEXUS_INK_SERVER_OK") ||
+                msg.contains("MATEPAD_INK_SERVER_OK")) {
+              // Discovered via Wi-Fi UDP. If not already connected via USB, connect
+              if (!_isConnected && !_isUsbMode) {
+                _connectToServer(dg.address, forceUsb: false);
+              }
+            }
+          }
+        }
+      });
+
+      // Broadcast discovery pulse for NexusInk Server (and legacy fallback)
+      _udpSocket!.send(
+        "DISCOVER_NEXUS_SERVER".codeUnits,
+        InternetAddress("255.255.255.255"),
+        5001,
+      );
+      _udpSocket!.send(
+        "DISCOVER_MATEPAD_SERVER".codeUnits,
+        InternetAddress("255.255.255.255"),
+        5001,
+      );
+    } catch (e) {
+      debugPrint("UDP bind error: $e");
+    }
+
+    // Simultaneously probe USB connection over TCP 127.0.0.1:5001
+    final isUsbAvailable = await _probeUsbDiscovery();
+    if (isUsbAvailable && mounted) {
+      setState(() => _usbDetected = true);
+      if (!_isConnected) {
+        // USB Direct Cable is available and preferred: connect immediately!
+        _connectToServer(InternetAddress.loopbackIPv4, forceUsb: true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.usb, color: Colors.cyanAccent, size: 18),
+                SizedBox(width: 8),
+                Text("⚡ USB Cable connected (Direct 127.0.0.1 mode)"),
+              ],
+            ),
+            backgroundColor: Color(0xFF181824),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _probeUsbDiscovery() async {
+    Socket? probeSocket;
+    try {
+      probeSocket = await Socket.connect(
+        '127.0.0.1',
+        5001,
+        timeout: const Duration(milliseconds: 1200),
+      );
+      probeSocket.setOption(SocketOption.tcpNoDelay, true);
+
+      // Send pulse query in case server waits for discovery ping
+      probeSocket.add("DISCOVER_NEXUS_SERVER\n".codeUnits);
+      probeSocket.add("DISCOVER_MATEPAD_SERVER\n".codeUnits);
+      await probeSocket.flush();
+
+      final completer = Completer<bool>();
+      Timer? timer;
+      timer = Timer(const Duration(milliseconds: 1500), () {
+        if (!completer.isCompleted) completer.complete(false);
+      });
+
+      probeSocket.listen(
+        (data) {
+          final msg = String.fromCharCodes(data);
+          if (msg.contains("MATEPAD_INK_SERVER_OK") ||
+              msg.contains("NEXUS_INK_SERVER_OK")) {
+            if (!completer.isCompleted) completer.complete(true);
+          }
+        },
+        onError: (_) {
+          if (!completer.isCompleted) completer.complete(false);
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete(false);
+        },
+        cancelOnError: true,
+      );
+
+      final success = await completer.future;
+      timer.cancel();
+      probeSocket.destroy();
+      return success;
+    } catch (_) {
+      probeSocket?.destroy();
+      return false;
+    }
+  }
+
+  Future<void> _connectToServer(InternetAddress ip, {bool? forceUsb}) async {
+    final isUsb = forceUsb ?? _isLoopback(ip);
+
+    // Clean up previous connections
+    _stylusTcpSocket?.destroy();
+    _stylusTcpSocket = null;
+    _videoSocket?.destroy();
+    _videoSocket = null;
+
     setState(() {
       _serverAddress = ip;
-      _isConnected = true;
+      _isUsbMode = isUsb;
+      _isConnected = !isUsb; // Wi-Fi connects immediately; USB waits for TCP connect
     });
+
+    if (isUsb) {
+      try {
+        final socket = await Socket.connect(
+          ip.address,
+          5000,
+          timeout: const Duration(seconds: 3),
+        );
+        socket.setOption(SocketOption.tcpNoDelay, true);
+        _stylusTcpSocket = socket;
+
+        socket.listen(
+          (_) {},
+          onError: (e) {
+            _onStylusSocketDisconnected();
+          },
+          onDone: () {
+            _onStylusSocketDisconnected();
+          },
+          cancelOnError: true,
+        );
+
+        if (mounted) {
+          setState(() {
+            _isConnected = true;
+            _usbDetected = true;
+          });
+        }
+      } catch (e) {
+        _stylusTcpSocket?.destroy();
+        _stylusTcpSocket = null;
+        if (mounted) {
+          setState(() => _isConnected = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                "USB Stylus connection failed (127.0.0.1:5000). Ensure ADB Reverse is active on PC: $e",
+              ),
+              backgroundColor: const Color(0xFFC0392B),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
     if (_showScreenStream) {
       _startVideoStream(ip.address);
     }
   }
 
+  void _onStylusSocketDisconnected() {
+    _stylusTcpSocket?.destroy();
+    _stylusTcpSocket = null;
+    if (mounted && _isUsbMode) {
+      setState(() {
+        _isConnected = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.usb_off, color: Colors.amberAccent, size: 18),
+              SizedBox(width: 8),
+              Text("USB Cable disconnected."),
+            ],
+          ),
+          backgroundColor: Color(0xFF232330),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _connectViaUsb() {
+    setState(() => _showScreenStream = true);
+    _connectToServer(InternetAddress.loopbackIPv4, forceUsb: true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.usb, color: Colors.cyanAccent, size: 18),
+              SizedBox(width: 8),
+              Text("Connecting via USB Cable (127.0.0.1)..."),
+            ],
+          ),
+          backgroundColor: Color(0xFF181824),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<void> _startVideoStream(String ip) async {
     _videoSocket?.destroy();
+    _videoSocket = null;
     if (!_showScreenStream) return;
 
     try {
-      _videoSocket = await Socket.connect(
+      final s = await Socket.connect(
         ip,
         5002,
         timeout: const Duration(seconds: 3),
       );
-      _videoSocket!.setOption(SocketOption.tcpNoDelay, true);
+      s.setOption(SocketOption.tcpNoDelay, true);
+      _videoSocket = s;
 
       final BytesBuilder buffer = BytesBuilder(copy: false);
       int? expectedLen;
 
-      _videoSocket!.listen(
+      s.listen(
         (Uint8List chunk) {
           buffer.add(chunk);
           while (true) {
@@ -160,10 +355,20 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
             }
           }
         },
-        onError: (_) => _videoSocket?.destroy(),
-        onDone: () => _videoSocket?.destroy(),
+        onError: (_) {
+          _videoSocket?.destroy();
+          _videoSocket = null;
+        },
+        onDone: () {
+          _videoSocket?.destroy();
+          _videoSocket = null;
+        },
+        cancelOnError: true,
       );
-    } catch (_) {}
+    } catch (_) {
+      _videoSocket?.destroy();
+      _videoSocket = null;
+    }
   }
 
   void _toggleScreenStream() {
@@ -171,6 +376,7 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
       _showScreenStream = !_showScreenStream;
       if (!_showScreenStream) {
         _videoSocket?.destroy();
+        _videoSocket = null;
         _currentFrame = null;
       } else if (_serverAddress != null) {
         _startVideoStream(_serverAddress!.address);
@@ -243,7 +449,7 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
       _currentPressure = adjustedPressure;
     });
 
-    if (_serverAddress == null || _udpSocket == null) return;
+    if (_serverAddress == null) return;
 
     final byteData = ByteData(28);
     byteData.setInt32(0, action, Endian.big);
@@ -254,110 +460,392 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
     byteData.setFloat32(20, event.orientation, Endian.big);
     byteData.setInt32(24, isEraser, Endian.big);
 
-    _udpSocket!.send(byteData.buffer.asUint8List(), _serverAddress!, 5000);
+    final bytes = byteData.buffer.asUint8List();
+
+    if (_isUsbMode) {
+      if (_stylusTcpSocket != null) {
+        try {
+          _stylusTcpSocket!.add(bytes);
+        } catch (_) {}
+      }
+    } else {
+      if (_udpSocket != null) {
+        try {
+          _udpSocket!.send(bytes, _serverAddress!, 5000);
+        } catch (_) {}
+      }
+    }
   }
 
   void _sendShortcut(int cmdCode) {
-    if (_serverAddress == null || _udpSocket == null) return;
+    if (_serverAddress == null) return;
     HapticFeedback.lightImpact();
     final byteData = ByteData(4)..setInt32(0, cmdCode, Endian.big);
-    _udpSocket!.send(byteData.buffer.asUint8List(), _serverAddress!, 5000);
+    final bytes = byteData.buffer.asUint8List();
+
+    if (_isUsbMode) {
+      if (_stylusTcpSocket != null) {
+        try {
+          _stylusTcpSocket!.add(bytes);
+        } catch (_) {}
+      }
+    } else {
+      if (_udpSocket != null) {
+        try {
+          _udpSocket!.send(bytes, _serverAddress!, 5000);
+        } catch (_) {}
+      }
+    }
   }
 
   void _openConfigModal() {
     final ctrl = TextEditingController(
-      text: _serverAddress?.address ?? "192.168.1.",
+      text: _serverAddress != null
+          ? (_isUsbMode ? "127.0.0.1" : _serverAddress!.address)
+          : "192.168.1.",
     );
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          backgroundColor: const Color(0xFF181820),
-          title: const Row(
+          backgroundColor: const Color(0xFF14141E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(
+              color: _isConnected
+                  ? (_isUsbMode
+                      ? Colors.cyanAccent.withOpacity(0.5)
+                      : Colors.greenAccent.withOpacity(0.4))
+                  : Colors.white12,
+              width: 1.2,
+            ),
+          ),
+          title: Row(
             children: [
-              Icon(Icons.draw, color: Colors.cyanAccent, size: 20),
-              SizedBox(width: 8),
-              Text(
-                "NexusInk-Client Settings",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child:
+                    const Icon(Icons.draw, color: Colors.cyanAccent, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  "NexusInk Connection",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _isConnected
+                      ? (_isUsbMode
+                          ? Colors.cyanAccent.withOpacity(0.2)
+                          : Colors.greenAccent.withOpacity(0.2))
+                      : Colors.amber.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isConnected
+                        ? (_isUsbMode ? Colors.cyanAccent : Colors.greenAccent)
+                        : Colors.amber,
+                    width: 0.8,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isConnected
+                          ? (_isUsbMode ? Icons.usb : Icons.wifi)
+                          : Icons.sensors_off,
+                      size: 11,
+                      color: _isConnected
+                          ? (_isUsbMode
+                              ? Colors.cyanAccent
+                              : Colors.greenAccent)
+                          : Colors.amber,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _isConnected
+                          ? (_isUsbMode ? "USB Mode" : "Wi-Fi Mode")
+                          : "Offline",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: _isConnected
+                            ? (_isUsbMode
+                                ? Colors.cyanAccent
+                                : Colors.greenAccent)
+                            : Colors.amber,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(
-                  labelText: "PC Server IP Address",
-                  hintText: "e.g., 192.168.1.100",
-                  border: OutlineInputBorder(),
-                ),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Dedicated "⚡ Connect via USB Cable" card
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: _usbDetected
+                            ? [
+                                const Color(0xFF0D3344),
+                                const Color(0xFF145455),
+                              ]
+                            : [
+                                const Color(0xFF1A1A2A),
+                                const Color(0xFF1E2638),
+                              ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _usbDetected
+                            ? Colors.greenAccent.withOpacity(0.7)
+                            : Colors.cyanAccent.withOpacity(0.35),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_usbDetected
+                                  ? Colors.greenAccent
+                                  : Colors.cyanAccent)
+                              .withOpacity(0.08),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _connectViaUsb();
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: (_usbDetected
+                                          ? Colors.greenAccent
+                                          : Colors.cyanAccent)
+                                      .withOpacity(0.18),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.usb,
+                                  color: _usbDetected
+                                      ? Colors.greenAccent
+                                      : Colors.cyanAccent,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Text(
+                                          "⚡ Connect via USB Cable",
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: (_usbDetected
+                                                    ? Colors.greenAccent
+                                                    : Colors.cyanAccent)
+                                                .withOpacity(0.2),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: _usbDetected
+                                                  ? Colors.greenAccent
+                                                  : Colors.cyanAccent
+                                                      .withOpacity(0.6),
+                                              width: 0.8,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            _usbDetected
+                                                ? "READY"
+                                                : "DIRECT 127.0.0.1",
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: _usbDetected
+                                                  ? Colors.greenAccent
+                                                  : Colors.cyanAccent,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    const Text(
+                                      "ADB Reverse • Sub-1ms TCP stylus & 60 FPS mirror",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right,
+                                color: Colors.white54,
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.white12)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          "OR WI-FI CONNECTION",
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white38,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Expanded(child: Divider(color: Colors.white12)),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: ctrl,
+                    style: const TextStyle(fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: "PC Server IP Address",
+                      hintText: "e.g., 192.168.1.100 or 127.0.0.1",
+                      prefixIcon: const Icon(Icons.wifi, size: 18),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      "Stretch to 100% Full Screen",
+                      style: TextStyle(fontSize: 13),
+                    ),
+                    subtitle: Text(
+                      _stretchFullScreen
+                          ? "Fills every pixel of the tablet screen"
+                          : "Locks 16:9 aspect ratio (prevents oval circles)",
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.white54),
+                    ),
+                    value: _stretchFullScreen,
+                    onChanged: (v) {
+                      setModalState(() => _stretchFullScreen = v);
+                      setState(() => _stretchFullScreen = v);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Pressure Sensitivity Curve: ${_pressureCurve.toStringAsFixed(2)}",
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  Slider(
+                    value: _pressureCurve,
+                    min: 0.5,
+                    max: 2.0,
+                    divisions: 6,
+                    onChanged: (v) {
+                      setModalState(() => _pressureCurve = v);
+                      setState(() => _pressureCurve = v);
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                  "Stretch to 100% Full Screen",
-                  style: TextStyle(fontSize: 13),
-                ),
-                subtitle: Text(
-                  _stretchFullScreen
-                      ? "Fills every pixel of the tablet screen"
-                      : "Locks 16:9 aspect ratio (prevents oval circles)",
-                  style: const TextStyle(fontSize: 11, color: Colors.white54),
-                ),
-                value: _stretchFullScreen,
-                onChanged: (v) {
-                  setModalState(() => _stretchFullScreen = v);
-                  setState(() => _stretchFullScreen = v);
-                },
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Pressure Sensitivity Curve: ${_pressureCurve.toStringAsFixed(2)}",
-                style: const TextStyle(fontSize: 13),
-              ),
-              Slider(
-                value: _pressureCurve,
-                min: 0.5,
-                max: 2.0,
-                divisions: 6,
-                onChanged: (v) {
-                  setModalState(() => _pressureCurve = v);
-                  setState(() => _pressureCurve = v);
-                },
-              ),
-            ],
+            ),
           ),
+          actionsPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           actions: [
-            TextButton(
+            TextButton.icon(
               onPressed: () {
                 _initSocketAndDiscover();
                 Navigator.pop(ctx);
               },
-              child: const Text("Auto-Discover"),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text("Auto-Discover"),
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed: () {
-                final ip = InternetAddress.tryParse(ctrl.text.trim());
+                final input = ctrl.text.trim();
+                final ip = (input == 'localhost' || input == '127.0.0.1')
+                    ? InternetAddress.loopbackIPv4
+                    : InternetAddress.tryParse(input);
                 if (ip != null) {
-                  _udpSocket?.send(
-                    "DISCOVER_NEXUS_SERVER".codeUnits,
-                    ip,
-                    5001,
-                  );
-                  _udpSocket?.send(
-                    "DISCOVER_MATEPAD_SERVER".codeUnits,
-                    ip,
-                    5001,
-                  );
-                  _connectToServerIp(ip);
+                  final isUsb = _isLoopback(ip);
+                  if (!isUsb) {
+                    _udpSocket?.send(
+                      "DISCOVER_NEXUS_SERVER".codeUnits,
+                      ip,
+                      5001,
+                    );
+                    _udpSocket?.send(
+                      "DISCOVER_MATEPAD_SERVER".codeUnits,
+                      ip,
+                      5001,
+                    );
+                  }
+                  _connectToServer(ip, forceUsb: isUsb);
                 }
                 Navigator.pop(ctx);
               },
-              child: const Text("Connect IP"),
+              icon: const Icon(Icons.link, size: 16),
+              label: const Text("Connect IP"),
             ),
           ],
         ),
@@ -435,6 +923,20 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
                                       color: Colors.white.withOpacity(0.09),
                                     ),
                                   ),
+                                  if (!_isConnected) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _usbDetected
+                                          ? "⚡ USB Cable Ready • Tap dock USB icon to connect"
+                                          : "Searching for NexusInk-Server (USB / Wi-Fi)...",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w400,
+                                        letterSpacing: 1,
+                                        color: Colors.white.withOpacity(0.18),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -448,6 +950,7 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
                             showGrid:
                                 !_showScreenStream || _currentFrame == null,
                             isConnected: _isConnected,
+                            isUsbMode: _isUsbMode,
                           ),
                         ),
                       ],
@@ -479,7 +982,9 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
                       ),
                       border: Border.all(
                         color: _isConnected
-                            ? Colors.greenAccent.withOpacity(0.35)
+                            ? (_isUsbMode
+                                ? Colors.cyanAccent.withOpacity(0.45)
+                                : Colors.greenAccent.withOpacity(0.35))
                             : Colors.amber.withOpacity(0.35),
                         width: 1,
                       ),
@@ -493,7 +998,9 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
                               ? Icons.chevron_right
                               : Icons.chevron_left,
                           color: _isConnected
-                              ? Colors.greenAccent
+                              ? (_isUsbMode
+                                  ? Colors.cyanAccent
+                                  : Colors.greenAccent)
                               : Colors.amber,
                           onTap: () => setState(
                             () => _isToolbarCollapsed = !_isToolbarCollapsed,
@@ -553,9 +1060,20 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
                             onTap: _toggleScreenStream,
                           ),
                           _FlushIconBtn(
+                            icon: Icons.usb,
+                            color: (_isConnected && _isUsbMode)
+                                ? Colors.cyanAccent
+                                : (_usbDetected
+                                    ? Colors.greenAccent
+                                    : Colors.white54),
+                            onTap: _connectViaUsb,
+                          ),
+                          _FlushIconBtn(
                             icon: Icons.tune,
                             color: _isConnected
-                                ? Colors.greenAccent
+                                ? (_isUsbMode
+                                    ? Colors.cyanAccent
+                                    : Colors.greenAccent)
                                 : Colors.amber,
                             onTap: _openConfigModal,
                           ),
@@ -575,6 +1093,7 @@ class _TabletWorkspaceState extends State<TabletWorkspace> {
   @override
   void dispose() {
     _udpSocket?.close();
+    _stylusTcpSocket?.destroy();
     _videoSocket?.destroy();
     super.dispose();
   }
@@ -614,6 +1133,7 @@ class _WorkspacePainter extends CustomPainter {
   final List<Offset> trail;
   final bool showGrid;
   final bool isConnected;
+  final bool isUsbMode;
 
   _WorkspacePainter({
     required this.pos,
@@ -621,6 +1141,7 @@ class _WorkspacePainter extends CustomPainter {
     required this.trail,
     required this.showGrid,
     required this.isConnected,
+    this.isUsbMode = false,
   });
 
   @override
@@ -646,9 +1167,10 @@ class _WorkspacePainter extends CustomPainter {
 
       // Outer border indicator
       final borderPaint = Paint()
-        ..color = (isConnected ? Colors.cyanAccent : Colors.amber).withOpacity(
-          0.18,
-        )
+        ..color = (isConnected
+                ? (isUsbMode ? Colors.cyanAccent : Colors.greenAccent)
+                : Colors.amber)
+            .withOpacity(0.18)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0;
       canvas.drawRect(Offset.zero & size, borderPaint);
@@ -698,5 +1220,6 @@ class _WorkspacePainter extends CustomPainter {
       old.pos != pos ||
       old.pressure != pressure ||
       old.showGrid != showGrid ||
-      old.isConnected != isConnected;
+      old.isConnected != isConnected ||
+      old.isUsbMode != isUsbMode;
 }
